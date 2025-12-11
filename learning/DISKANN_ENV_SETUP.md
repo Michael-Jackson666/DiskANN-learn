@@ -1,23 +1,23 @@
-# DiskANN Environment Setup (macOS-friendly)
+ # DiskANN 环境配置（适用于 macOS）
 
-This document provides recommended ways to get DiskANN building and running for development and experimentation. Two approaches are supported:
+ 本文档给出在 macOS 平台上运行和开发 DiskANN 的推荐配置方法。我们提供两种可选方式：
 
-- Option A (Recommended): Use Docker to get a Linux-compatible environment with all dependencies already specified by the repository Dockerfiles.
-- Option B (macOS native): Install dependencies on macOS and build natively (works with caveats; some features rely on Linux-specific libs like libaio).
+ - 方式 A（推荐）：使用 Docker 在 Linux 容器中运行与开发，保证与 CI/测试环境的一致性。
+ - 方式 B（macOS 原生）：在 macOS 上安装依赖并原生编译（可用，但某些 Linux 专属功能可能受限，比如 libaio）。
 
 ---
 
-## Option A — Docker (Recommended on macOS)
+ ## 方式 A — Docker（macOS 推荐）
 
-Why Docker? DiskANN is primarily tested on Linux and Windows. The easiest and most reproducible way to get a working environment on macOS is to use the repo's Docker images which match CI instructions and provide all dependencies.
+ 为什么使用 Docker？DiskANN 在 Linux 与 Windows 上测试更全面。对于 macOS 用户来说，使用 Docker 可以获得与 CI 环境一致的镜像和依赖，最简单、最可复现。
 
-Prerequisites:
-- Docker Desktop for Mac (https://docs.docker.com/desktop/mac/install/)
-- Optional: Increase memory / CPU settings for Docker if you plan to use bigger datasets.
+ 前置条件：
+ - Docker Desktop for Mac（https://docs.docker.com/desktop/mac/install/）
+ - 可选：如果打算用大型数据集，建议在 Docker 设置中分配更多内存和 CPU。
 
 Steps:
 
-1. Build the dev image (fast, reproducible):
+ 1. 构建开发镜像（快速且可复现）：
 
 ```bash
 # From the repo root
@@ -25,13 +25,13 @@ Steps:
 docker build -f DockerfileDev -t diskann-dev:local .
 ```
 
-2. Start a container and mount your repo for iterative development:
+ 2. 启动容器并挂载仓库以便迭代开发：
 
 ```bash
 docker run -it --name diskann-dev --rm -v "$PWD":/workspace -w /workspace diskann-dev:local /bin/bash
 ```
 
-Inside the container (quick build):
+ 容器内快速构建示例：
 
 ```bash
 mkdir -p build && cd build
@@ -39,26 +39,26 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j$(nproc)
 ```
 
-3. Run a small example (in-memory search executable):
+ 3. 运行示例（内存索引 / 检索）：
 
 ```bash
 # Replace with the actual binary path; built binaries are under apps or src output
 ./apps/search_memory_index -db_file <path-to-dataset> -query_file <path-to-queries> -indexType in-memory
 ```
 
-For more guidance, see `/workflows/*` files in the repo root.
+ 更多用法请参见仓库根目录下的 `/workflows/*` 文档。
 
 ---
 
-## Option B — macOS Native Build
+ ## 方式 B — macOS 原生构建
 
-macOS is not the officially tested platform for DiskANN. Native builds can succeed for core functionality but some Linux-specific features (like `libaio` and certain ASYNC file readers) may not be available or used on macOS.
+ 注意：macOS 不是 DiskANN 官方常测平台，原生构建在核心功能上一般可用，但某些基于 Linux 的特性（例如 `libaio` 或异步文件读写）可能不可用或需要额外适配。
 
-### 1) Prerequisites
+ ### 1） 前置依赖
 
-- Xcode Command Line Tools (compile toolchain)
-- Homebrew (https://brew.sh/)
-- Install common dependencies using brew:
+ - Xcode Command Line Tools（用于编译）
+ - Homebrew（https://brew.sh/）
+ - 使用 brew 安装常用依赖：
 
 ```bash
 # Install Homebrew first if you don't have it
@@ -69,59 +69,61 @@ brew update
 brew install cmake boost gperftools openmp wget clang-format python3
 ```
 
-Note: On macOS `libaio` is not applicable. DiskANN uses libaio for asynchronous operations on Linux; the in-memory paths and some features will still work.
+ 注意：macOS 上没有 `libaio`，DiskANN 在 Linux 上使用 `libaio` 做异步 IO。大多数内存索引功能仍可工作，但基于磁盘的异步索引功能可能受限。
 
-### 2) Install Intel oneAPI MKL (recommended)
+ ### 2） 安装 Intel oneAPI MKL（推荐）
 
-DiskANN relies on MKL for certain operations. The repository expects MKL in some standard locations, so we recommend installing Intel oneAPI MKL on macOS.
+ DiskANN 在一些线性代数运算中依赖 MKL，因此推荐在 macOS 上安装 Intel oneAPI MKL，使得 CMake 能在默认路径下找到 MKL。
 
 1. Download and install Intel oneAPI Base Toolkit and MKL (https://software.intel.com/content/www/us/en/develop/tools/oneapi/base-toolkit.html)
-2. Source the setvars script so the compiler can find MKL & OMP shared libs. For example, after installing to `/opt/intel/oneapi`:
+ 2. 安装后执行 setvars 脚本，让编译器与 CMake 能找到 MKL 和 Intel OMP。例如安装在 `/opt/intel/oneapi` 后：
 
-```bash
-source /opt/intel/oneapi/setvars.sh
-```
+ ```bash
+ source /opt/intel/oneapi/setvars.sh
+ ```
 
-3. If CMake cannot find MKL automatically, you can provide paths explicitly:
+ 3. 如果 CMake 无法自动找到 MKL，可显式指定路径：
 
 ```bash
 cmake -DMKL_PATH=/opt/intel/oneapi/mkl/latest -DMKL_INCLUDE_PATH=/opt/intel/oneapi/mkl/latest/include -DOMP_PATH=/opt/intel/oneapi/compiler/latest/linux/compiler/lib/intel64_lin -DCMAKE_BUILD_TYPE=Release ..
 ```
 
-Adjust paths depending on your installation location.
+ 根据实际安装路径调整上述参数。
 
-If you are unable to use MKL on macOS, you may try to use OpenBLAS as a fallback. However, the repo uses MKL header includes; this may require small code changes or header wrapper to compile with OpenBLAS.
+ 如果无法在 macOS 上使用 MKL，可以尝试 OpenBLAS 作为替代，但需要修改包含头文件或添加适配层，可能会有额外工作量。
 
-### 3) Build steps (native)
+ ### 3） 原生编译步骤
 
 ```bash
-# From the repo root
-git submodule init && git submodule update --recursive
-mkdir -p build && cd build
-# Provide MKL path if needed, and ensure OpenMP is found
-cmake -DCMAKE_BUILD_TYPE=Release -DMKL_PATH=/opt/intel/oneapi/mkl/latest -DMKL_INCLUDE_PATH=/opt/intel/oneapi/mkl/latest/include ..
-make -j$(sysctl -n hw.ncpu)
+ ```bash
+ # 在仓库根目录
+ git submodule init && git submodule update --recursive
+ mkdir -p build && cd build
+ # 如有需要，提供 MKL 路径并确保 OpenMP 可用
+ cmake -DCMAKE_BUILD_TYPE=Release -DMKL_PATH=/opt/intel/oneapi/mkl/latest -DMKL_INCLUDE_PATH=/opt/intel/oneapi/mkl/latest/include ..
+ make -j$(sysctl -n hw.ncpu)
+ ```
 ```
 
-Possible caveats / overrides:
-- If OpenMP not found via brew, you can install `libiomp` via brew (e.g., `brew install libomp`) and set environment variables so clang can use it.
-- `libaio` is a Linux-only dependency; some async features (disk-based index operations) may not work.
-- If you see MKL errors, make sure the `MKL_PATH` and `MKL_INCLUDE_PATH` CMake variables are set correctly.
+ 可能注意事项 / 替代配置：
+ - 如果 brew 安装的 OpenMP 无法被 clang 检测到，可通过 `brew install libomp` 并设置 `LDFLAGS` / `CPPFLAGS` 或 CMake 参数来指向 OpenMP 的库与头文件。
+ - `libaio` 为 Linux 专属库，部分基于磁盘的异步功能会在 macOS 上不可用。
+ - 若出现 MKL 相关错误，请检查 `MKL_PATH` 与 `MKL_INCLUDE_PATH` 是否正确。
 
-### 4) Run a small example
+ ### 4） 运行示例
 
 ```bash
 # Run a built app, adjust binary path if needed
 ./apps/search_memory_index -db_file <path-to-dataset> -query_file <path-to-query> -indexType in-memory
 ```
 
-If you do not have a dataset handy, you can generate a small random dataset in Python and then use DiskANN's `apps` utilities to build an index and test queries.
+ 如果没有现成数据，可用 Python 生成小规模随机数据，然后用 DiskANN 的 `apps` 工具构建索引并测试查询。
 
 ---
 
-## Python wrapper (optional)
+ ## Python 绑定（可选）
 
-The repo includes `python/` submodule and `diskannpy` to use DiskANN from Python. If you'd like Python bindings, inside the `python` dir, follow `python/README.md` steps:
+ 仓库包含 `python/` 子模块和 `diskannpy`，可用于从 Python 调用 DiskANN。若想使用 Python 绑定，请进入 `python` 并按 `python/README.md` 中的指引操作：
 
 ```bash
 cd python
@@ -131,17 +133,17 @@ pip install -e .
 
 ---
 
-## Troubleshooting
+ ## 常见问题排查（Troubleshooting）
 
-- If `cmake` complains about missing `Boost`, install it via brew: `brew install boost` and then run `cmake` with `-DBOOST_ROOT=$(brew --prefix boost)`.
-- If you run into MKL errors, verify paths and `source` Intel `setvars.sh`, or try installing an OpenBLAS alternative.
-- If you prefer not to install MKL, use the Docker approach.
+ - 如果 `cmake` 报错找不到 `Boost`：使用 `brew install boost` 安装，然后运行 `cmake` 时添加 `-DBOOST_ROOT=$(brew --prefix boost)`。
+ - 如果遇到 MKL 相关错误：验证 `MKL_PATH` / `MKL_INCLUDE_PATH` 是否正确，并确认已 `source /opt/intel/oneapi/setvars.sh`。
+ - 如果你不想安装 MKL，推荐使用 Docker 方案。
 
 ---
 
-## Next Steps — Examples
+ ## 下一步：示例与学习笔记
 
-If you want, I can add a step-by-step example (download a sample dataset, build an in-memory index, and run search) in the `learning/jack/` folder and add a short `notes.md` describing how indexes map to the `apps` directory.
+ 我可以为你在 `learning/jack/` 下添加一个完整示例（下载小数据集、构建内存索引并运行检索），并添加一个中文 `notes.md`，详细说明 `apps` 中关键工具和命令如何使用。
 
 ---
 
