@@ -1,154 +1,276 @@
- # DiskANN 环境配置（适用于 macOS）
+# DiskANN 环境配置 - Docker 方式（macOS 推荐）
 
- 本文档给出在 macOS 平台上运行和开发 DiskANN 的推荐配置方法。我们提供两种可选方式：
+本文档介绍如何在 macOS 上使用 Docker 运行和开发 DiskANN。
 
- - 方式 A（推荐）：使用 Docker 在 Linux 容器中运行与开发，保证与 CI/测试环境的一致性。
- - 方式 B（macOS 原生）：在 macOS 上安装依赖并原生编译（可用，但某些 Linux 专属功能可能受限，比如 libaio）。
+**为什么使用 Docker？**
+- DiskANN 在 Linux 环境下测试最充分
+- Docker 提供与 CI 环境一致的依赖和配置
+- 无需在 macOS 上安装复杂的依赖（如 MKL、libaio 等）
+- 开箱即用，避免环境配置问题
 
 ---
 
- ## 方式 A — Docker（macOS 推荐）
+## 前置条件
 
- 为什么使用 Docker？DiskANN 在 Linux 与 Windows 上测试更全面。对于 macOS 用户来说，使用 Docker 可以获得与 CI 环境一致的镜像和依赖，最简单、最可复现。
+✅ 已安装 Docker Desktop for Mac
 
- 前置条件：
- - Docker Desktop for Mac（https://docs.docker.com/desktop/mac/install/）
- - 可选：如果打算用大型数据集，建议在 Docker 设置中分配更多内存和 CPU。
+如果还没安装，请从官网下载：https://docs.docker.com/desktop/mac/install/
 
-Steps:
+验证 Docker 是否正常运行：
+```bash
+docker --version
+docker ps
+```
 
- 1. 构建开发镜像（快速且可复现）：
+---
+
+## 完整操作流程
+
+### 步骤 1：进入 DiskANN 仓库目录
 
 ```bash
-# From the repo root
-# Build the development image defined by DockerfileDev
+cd /Users/jack/Desktop/Intership/Code/DiskANN-learn
+```
+
+### 步骤 2：构建 Docker 开发镜像
+
+这一步会根据仓库提供的 `DockerfileDev` 构建一个包含所有依赖的 Linux 开发环境。
+
+```bash
 docker build -f DockerfileDev -t diskann-dev:local .
 ```
 
- 2. 启动容器并挂载仓库以便迭代开发：
+**说明：**
+- `-f DockerfileDev`：指定使用 DockerfileDev 文件
+- `-t diskann-dev:local`：给镜像打标签，方便后续使用
+- `.`：构建上下文为当前目录
+
+⏱️ 首次构建需要 5-15 分钟（取决于网络速度），镜像会自动安装：
+- CMake、g++、make 等编译工具
+- Boost、MKL、libaio、gperftools 等依赖库
+- Python 3.10 环境
+
+### 步骤 3：启动 Docker 容器
 
 ```bash
-docker run -it --name diskann-dev --rm -v "$PWD":/workspace -w /workspace diskann-dev:local /bin/bash
+docker run -it --name diskann-dev --rm \
+  -v "$PWD":/workspace \
+  -w /workspace \
+  diskann-dev:local /bin/bash
 ```
 
- 容器内快速构建示例：
+**参数说明：**
+- `-it`：交互式终端模式
+- `--name diskann-dev`：容器名称
+- `--rm`：退出容器后自动删除（下次重新创建）
+- `-v "$PWD":/workspace`：挂载当前目录到容器的 /workspace（代码修改会实时同步）
+- `-w /workspace`：设置工作目录为 /workspace
+- `/bin/bash`：启动 bash shell
+
+✅ 执行后你会进入容器内部，提示符变为类似 `root@xxxxx:/workspace#`
+
+### 步骤 4：在容器内编译 DiskANN
+
+现在你已经在 Linux 容器环境中了，可以开始编译：
 
 ```bash
+# 初始化 git submodule（如果还没初始化）
+git submodule init && git submodule update --recursive
+
+# 创建 build 目录并进入
 mkdir -p build && cd build
+
+# 使用 CMake 配置项目（Release 模式）
 cmake -DCMAKE_BUILD_TYPE=Release ..
+
+# 编译（使用所有可用 CPU 核心）
 make -j$(nproc)
 ```
 
- 3. 运行示例（内存索引 / 检索）：
+⏱️ 编译时间约 3-10 分钟
+
+编译成功后，所有可执行文件在 `build/apps/` 目录下。
+
+### 步骤 5：验证编译结果
+
+查看生成的可执行文件：
 
 ```bash
-# Replace with the actual binary path; built binaries are under apps or src output
-./apps/search_memory_index -db_file <path-to-dataset> -query_file <path-to-queries> -indexType in-memory
+# 列出编译好的工具
+ls -lh apps/
+
+# 常用的工具包括：
+# - build_memory_index：构建内存索引
+# - search_memory_index：检索内存索引
+# - build_disk_index：构建磁盘索引
+# - search_disk_index：检索磁盘索引
 ```
 
- 更多用法请参见仓库根目录下的 `/workflows/*` 文档。
+查看某个工具的帮助信息：
+
+```bash
+./apps/build_memory_index --help
+```
+
+### 步骤 6：准备测试数据（可选）
+
+如果你想快速测试，可以生成一个小规模的随机数据集：
+
+```bash
+# 在容器内创建测试数据目录
+mkdir -p /workspace/test_data
+
+# 使用 Python 生成随机向量数据
+python3 << 'EOF'
+import struct
+import numpy as np
+
+# 生成 1000 个 128 维的随机向量作为数据库
+n_points = 1000
+dim = 128
+data = np.random.randn(n_points, dim).astype(np.float32)
+
+# 保存为 DiskANN 格式（二进制）
+with open('/workspace/test_data/random_vectors.bin', 'wb') as f:
+    f.write(struct.pack('i', n_points))  # 数据点数量
+    f.write(struct.pack('i', dim))        # 维度
+    data.tofile(f)
+
+# 生成 10 个查询向量
+n_queries = 10
+queries = np.random.randn(n_queries, dim).astype(np.float32)
+with open('/workspace/test_data/query_vectors.bin', 'wb') as f:
+    f.write(struct.pack('i', n_queries))
+    f.write(struct.pack('i', dim))
+    queries.tofile(f)
+
+print(f"✅ 已生成测试数据：{n_points} 个向量，{n_queries} 个查询，维度 {dim}")
+EOF
+```
+
+### 步骤 7：构建并检索索引（完整示例）
+
+```bash
+# 构建内存索引
+./apps/build_memory_index \
+  --data_type float \
+  --dist_fn l2 \
+  --data_path /workspace/test_data/random_vectors.bin \
+  --index_path_prefix /workspace/test_data/index_random
+
+# 执行检索
+./apps/search_memory_index \
+  --data_type float \
+  --dist_fn l2 \
+  --index_path_prefix /workspace/test_data/index_random \
+  --query_file /workspace/test_data/query_vectors.bin \
+  --K 10 \
+  --result_path /workspace/test_data/search_results.txt
+
+# 查看检索结果
+head -20 /workspace/test_data/search_results.txt
+```
+
+**参数说明：**
+- `--data_type float`：数据类型（float/int8/uint8）
+- `--dist_fn l2`：距离度量（l2/cosine/mips）
+- `--K 10`：返回前 10 个最近邻
 
 ---
 
- ## 方式 B — macOS 原生构建
+## 常用操作
 
- 注意：macOS 不是 DiskANN 官方常测平台，原生构建在核心功能上一般可用，但某些基于 Linux 的特性（例如 `libaio` 或异步文件读写）可能不可用或需要额外适配。
-
- ### 1） 前置依赖
-
- - Xcode Command Line Tools（用于编译）
- - Homebrew（https://brew.sh/）
- - 使用 brew 安装常用依赖：
+### 退出容器
 
 ```bash
-# Install Homebrew first if you don't have it
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Install packages
-brew update
-brew install cmake boost gperftools openmp wget clang-format python3
+exit
+# 或按 Ctrl+D
 ```
 
- 注意：macOS 上没有 `libaio`，DiskANN 在 Linux 上使用 `libaio` 做异步 IO。大多数内存索引功能仍可工作，但基于磁盘的异步索引功能可能受限。
+由于使用了 `--rm` 参数，容器会自动删除，但编译结果保留在本地 `build/` 目录中。
 
- ### 2） 安装 Intel oneAPI MKL（推荐）
-
- DiskANN 在一些线性代数运算中依赖 MKL，因此推荐在 macOS 上安装 Intel oneAPI MKL，使得 CMake 能在默认路径下找到 MKL。
-
-1. Download and install Intel oneAPI Base Toolkit and MKL (https://software.intel.com/content/www/us/en/develop/tools/oneapi/base-toolkit.html)
- 2. 安装后执行 setvars 脚本，让编译器与 CMake 能找到 MKL 和 Intel OMP。例如安装在 `/opt/intel/oneapi` 后：
-
- ```bash
- source /opt/intel/oneapi/setvars.sh
- ```
-
- 3. 如果 CMake 无法自动找到 MKL，可显式指定路径：
+### 重新进入开发环境
 
 ```bash
-cmake -DMKL_PATH=/opt/intel/oneapi/mkl/latest -DMKL_INCLUDE_PATH=/opt/intel/oneapi/mkl/latest/include -DOMP_PATH=/opt/intel/oneapi/compiler/latest/linux/compiler/lib/intel64_lin -DCMAKE_BUILD_TYPE=Release ..
+# 确保在仓库根目录
+cd /Users/jack/Desktop/Intership/Code/DiskANN-learn
+
+# 重新启动容器（使用相同命令）
+docker run -it --name diskann-dev --rm \
+  -v "$PWD":/workspace \
+  -w /workspace \
+  diskann-dev:local /bin/bash
+
+# 进入 build 目录继续工作
+cd build
 ```
 
- 根据实际安装路径调整上述参数。
+### 在容器外查看日志或文件
 
- 如果无法在 macOS 上使用 MKL，可以尝试 OpenBLAS 作为替代，但需要修改包含头文件或添加适配层，可能会有额外工作量。
-
- ### 3） 原生编译步骤
+由于挂载了本地目录，所有在容器内生成的文件都会同步到你的 macOS 目录：
 
 ```bash
- ```bash
- # 在仓库根目录
- git submodule init && git submodule update --recursive
- mkdir -p build && cd build
- # 如有需要，提供 MKL 路径并确保 OpenMP 可用
- cmake -DCMAKE_BUILD_TYPE=Release -DMKL_PATH=/opt/intel/oneapi/mkl/latest -DMKL_INCLUDE_PATH=/opt/intel/oneapi/mkl/latest/include ..
- make -j$(sysctl -n hw.ncpu)
- ```
+# 在 macOS 终端中
+ls -lh /Users/jack/Desktop/Intership/Code/DiskANN-learn/build/apps/
+cat /Users/jack/Desktop/Intership/Code/DiskANN-learn/test_data/search_results.txt
 ```
 
- 可能注意事项 / 替代配置：
- - 如果 brew 安装的 OpenMP 无法被 clang 检测到，可通过 `brew install libomp` 并设置 `LDFLAGS` / `CPPFLAGS` 或 CMake 参数来指向 OpenMP 的库与头文件。
- - `libaio` 为 Linux 专属库，部分基于磁盘的异步功能会在 macOS 上不可用。
- - 若出现 MKL 相关错误，请检查 `MKL_PATH` 与 `MKL_INCLUDE_PATH` 是否正确。
+### 清理 Docker 资源（可选）
 
- ### 4） 运行示例
+如果需要重新构建镜像或清理空间：
 
 ```bash
-# Run a built app, adjust binary path if needed
-./apps/search_memory_index -db_file <path-to-dataset> -query_file <path-to-query> -indexType in-memory
-```
+# 删除镜像
+docker rmi diskann-dev:local
 
- 如果没有现成数据，可用 Python 生成小规模随机数据，然后用 DiskANN 的 `apps` 工具构建索引并测试查询。
-
----
-
- ## Python 绑定（可选）
-
- 仓库包含 `python/` 子模块和 `diskannpy`，可用于从 Python 调用 DiskANN。若想使用 Python 绑定，请进入 `python` 并按 `python/README.md` 中的指引操作：
-
-```bash
-cd python
-# Typically, it relies on building the C++ project and then installing diskannpy
-pip install -e .
+# 清理未使用的镜像和容器
+docker system prune -a
 ```
 
 ---
 
- ## 常见问题排查（Troubleshooting）
+## 常见问题排查
 
- - 如果 `cmake` 报错找不到 `Boost`：使用 `brew install boost` 安装，然后运行 `cmake` 时添加 `-DBOOST_ROOT=$(brew --prefix boost)`。
- - 如果遇到 MKL 相关错误：验证 `MKL_PATH` / `MKL_INCLUDE_PATH` 是否正确，并确认已 `source /opt/intel/oneapi/setvars.sh`。
- - 如果你不想安装 MKL，推荐使用 Docker 方案。
+### 1. Docker 启动失败
+
+确保 Docker Desktop 正在运行：
+```bash
+open -a Docker
+```
+
+### 2. 构建镜像时网络超时
+
+可以配置 Docker 使用国内镜像源，编辑 Docker Desktop → Preferences → Docker Engine，添加：
+```json
+{
+  "registry-mirrors": ["https://docker.mirrors.ustc.edu.cn/"]
+}
+```
+
+### 3. 磁盘空间不足
+
+Docker 镜像较大（约 2-3GB），确保有足够空间：
+```bash
+docker system df
+```
+
+### 4. 容器内无法访问 GPU
+
+DiskANN 主要使用 CPU。如需 GPU 支持，需要额外配置 NVIDIA Container Toolkit。
 
 ---
 
- ## 下一步：示例与学习笔记
+## 下一步学习
 
- 我可以为你在 `learning/jack/` 下添加一个完整示例（下载小数据集、构建内存索引并运行检索），并添加一个中文 `notes.md`，详细说明 `apps` 中关键工具和命令如何使用。
+- 查看 `workflows/` 目录下的详细文档了解更多功能
+- 尝试使用真实数据集（如 SIFT1M）测试性能
+- 探索 Python 绑定：在容器内 `cd python && pip install -e .`
 
 ---
 
-References:
-- Project README.md — top-level build instructions and links to `workflows/*.md`
-- DockerfileDev — for reproducible dev environment
-- Intel oneAPI (MKL) — https://www.intel.com/content/www/us/en/developer/tools/oneapi.html
+## 参考资料
+
+- 项目主 README：`/Users/jack/Desktop/Intership/Code/DiskANN-learn/README.md`
+- Dockerfile 定义：`DockerfileDev`
+- 官方 Workflows：`workflows/*.md`
 
